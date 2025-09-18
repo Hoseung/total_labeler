@@ -1,280 +1,380 @@
 #!/usr/bin/env python3
-"""Simple GUI tool for labeling frame properties.
+"""Simple GUI tool for labeling frame properties using OpenCV.
 
 The tool iterates through image frames inside a directory, displays them, and
-lets the user assign a numeric property (1-9) to each frame. The default
-property for a frame inherits from the previous frame to make labeling
-contiguous regions faster.
+lets the user assign numeric properties (1-9) to each frame. Supports multiple
+named properties per frame and variable playback speeds.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
-from dataclasses import dataclass
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
-import tkinter as tk
-from tkinter import filedialog, messagebox
-
-try:
-    from PIL import Image, ImageTk
-except ImportError as exc:  # pragma: no cover - makes missing dependency obvious
-    raise SystemExit(
-        "Pillow is required. Install it with 'pip install Pillow'."
-    ) from exc
+import cv2
+import numpy as np
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"}
 
 
-@dataclass
-class FrameInfo:
-    path: Path
-    property_value: Optional[int] = None
-
-
 class FrameLabelerApp:
-    def __init__(self, root: tk.Tk, image_dir: Path, labels_path: Path, fps: float = 5.0):
-        self.root = root
+    def __init__(self, image_dir: Path, labels_path: Path, property_name: str, fps: float = 5.0):
         self.image_dir = image_dir
         self.labels_path = labels_path
-        self.interval_ms = int(max(1, 1000 / max(fps, 0.1)))
-
-        self.frames: List[FrameInfo] = self._load_frames()
+        self.property_name = property_name
+        self.base_fps = fps
+        self.fps = fps
+        self.speed_multiplier = 1.0
+        self.available_speeds = [1.0, 1.5, 2.0]
+        self.speed_index = 0
+        
+        self.frames: List[Path] = self._load_frames()
         if not self.frames:
             raise SystemExit(f"No image frames found in {image_dir}")
-
-        self.labels: Dict[str, int] = self._load_existing_labels()
+        
+        self.labels: Dict[str, Dict[str, Set[int]]] = self._load_existing_labels()
         self.current_index = 0
+        self.current_property = 1
         self.playing = False
-        self.photo_cache: Dict[int, ImageTk.PhotoImage] = {}
         self.display_size = (960, 540)
-
-        self.property_var = tk.IntVar()
-        self.status_text = tk.StringVar()
-
-        self._build_ui()
-        self._apply_default_property(0)
-        self._show_frame()
-        self._update_status()
-
-    def _load_frames(self) -> List[FrameInfo]:
+        self.window_name = f"Frame Property Labeler - {property_name}"
+        
+        # Apply default properties from existing labels
+        for i, frame_path in enumerate(self.frames):
+            key = self._frame_key(frame_path)
+            if key in self.labels and self.property_name in self.labels[key]:
+                if i == 0 and self.labels[key][self.property_name]:
+                    # Use the first value as default
+                    self.current_property = min(self.labels[key][self.property_name])
+    
+    def _load_frames(self) -> List[Path]:
         files = [
-            FrameInfo(path=path)
-            for path in sorted(self.image_dir.iterdir())
+            path for path in sorted(self.image_dir.iterdir())
             if path.suffix.lower() in SUPPORTED_EXTENSIONS and path.is_file()
         ]
         return files
-
-    def _load_existing_labels(self) -> Dict[str, int]:
+    
+    def _load_existing_labels(self) -> Dict[str, Dict[str, Set[int]]]:
+        """Load existing labels. Structure: {frame_key: {property_name: set(values)}}"""
         if not self.labels_path.exists():
             return {}
         try:
             with self.labels_path.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
         except json.JSONDecodeError as exc:
-            messagebox.showwarning(
-                "Labels file error",
-                f"Failed to read {self.labels_path}: {exc}\nStarting with empty labels.",
-            )
+            print(f"Failed to read {self.labels_path}: {exc}")
+            print("Starting with empty labels.")
             return {}
-        return {str(k): int(v) for k, v in data.items()}
-
-    def _build_ui(self) -> None:
-        self.root.title("Frame Property Labeler")
-        self.root.bind("<Left>", lambda _event: self.show_previous())
-        self.root.bind("<Right>", lambda _event: self.show_next())
-        self.root.bind("<space>", lambda _event: self.toggle_play())
-        for digit in range(1, 10):
-            self.root.bind(str(digit), lambda event, value=digit: self.set_property(value))
-
-        # Image display area.
-        self.image_label = tk.Label(self.root)
-        self.image_label.pack(side=tk.TOP, padx=10, pady=10, expand=True)
-
-        # Property selection controls.
-        property_frame = tk.Frame(self.root)
-        property_frame.pack(side=tk.TOP, pady=5)
-        tk.Label(property_frame, text="Property:").pack(side=tk.LEFT, padx=4)
-        for value in range(1, 10):
-            btn = tk.Radiobutton(
-                property_frame,
-                text=str(value),
-                variable=self.property_var,
-                value=value,
-                command=lambda v=value: self.set_property(v),
-            )
-            btn.pack(side=tk.LEFT)
-
-        # Playback controls.
-        controls = tk.Frame(self.root)
-        controls.pack(side=tk.TOP, pady=10)
-        tk.Button(controls, text="Prev", command=self.show_previous).pack(side=tk.LEFT, padx=5)
-        self.play_button = tk.Button(controls, text="Play", command=self.toggle_play)
-        self.play_button.pack(side=tk.LEFT, padx=5)
-        tk.Button(controls, text="Next", command=self.show_next).pack(side=tk.LEFT, padx=5)
-
-        # Status bar.
-        status_bar = tk.Frame(self.root)
-        status_bar.pack(side=tk.TOP, fill=tk.X, pady=(5, 10))
-        tk.Label(status_bar, textvariable=self.status_text).pack(side=tk.LEFT, padx=10)
-        tk.Button(status_bar, text="Save", command=self._save_labels).pack(side=tk.RIGHT, padx=10)
-
-    def _apply_default_property(self, index: int) -> None:
-        frame = self.frames[index]
-        key = self._frame_key(frame)
-        if key in self.labels:
-            frame.property_value = self.labels[key]
+        
+        # Convert loaded data to the expected structure
+        result = {}
+        for frame_key, properties in data.items():
+            if isinstance(properties, dict):
+                # New format: multiple properties
+                result[frame_key] = {}
+                for prop_name, values in properties.items():
+                    if isinstance(values, list):
+                        result[frame_key][prop_name] = set(values)
+                    else:
+                        # Single value, convert to set
+                        result[frame_key][prop_name] = {values}
+            else:
+                # Old format: single unnamed property
+                result[frame_key] = {"default": {properties}}
+        
+        return result
+    
+    def _frame_key(self, frame_path: Path) -> str:
+        return frame_path.relative_to(self.image_dir).as_posix()
+    
+    def _get_frame_properties(self, index: int) -> Set[int]:
+        """Get all property values for a frame in the current property category."""
+        frame_path = self.frames[index]
+        key = self._frame_key(frame_path)
+        
+        if key in self.labels and self.property_name in self.labels[key]:
+            return self.labels[key][self.property_name]
         elif index > 0:
-            prev_property = self.frames[index - 1].property_value
-            frame.property_value = prev_property
+            # Inherit from previous frame
+            prev_key = self._frame_key(self.frames[index - 1])
+            if prev_key in self.labels and self.property_name in self.labels[prev_key]:
+                return self.labels[prev_key][self.property_name].copy()
+        return {self.current_property}
+    
+    def _display_frame(self) -> np.ndarray:
+        """Load and prepare the current frame for display."""
+        frame_path = self.frames[self.current_index]
+        img = cv2.imread(str(frame_path))
+        
+        if img is None:
+            # Create placeholder for broken images
+            img = np.zeros((100, 200, 3), dtype=np.uint8)
+            cv2.putText(img, "Error loading image", (10, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         else:
-            frame.property_value = frame.property_value or 1
-        self.property_var.set(frame.property_value or 1)
-
-    def _frame_key(self, frame: FrameInfo) -> str:
-        return frame.path.relative_to(self.image_dir).as_posix()
-
-    def _show_frame(self) -> None:
-        frame = self.frames[self.current_index]
-        photo = self._get_photo(self.current_index)
-        self.image_label.configure(image=photo)
-        self.image_label.image = photo
-        if frame.property_value is None:
-            self._apply_default_property(self.current_index)
-        else:
-            self.property_var.set(frame.property_value)
-
-    def _update_status(self) -> None:
-        frame = self.frames[self.current_index]
-        key = self._frame_key(frame)
-        property_value = frame.property_value or self.property_var.get()
-        self.status_text.set(
-            f"Frame {self.current_index + 1}/{len(self.frames)} | {key} | Property: {property_value}"
-        )
-
-    def _get_photo(self, index: int) -> ImageTk.PhotoImage:
-        if index in self.photo_cache:
-            return self.photo_cache[index]
-        frame = self.frames[index]
-        with Image.open(frame.path) as img:
-            image = img.copy()
-        image.thumbnail(self.display_size, Image.Resampling.LANCZOS)
-        photo = ImageTk.PhotoImage(image)
-        self.photo_cache[index] = photo
-        return photo
-
-    def set_property(self, value: int) -> None:
-        frame = self.frames[self.current_index]
-        frame.property_value = value
-        self.property_var.set(value)
-        self.labels[self._frame_key(frame)] = value
-        self._save_labels()
-        self._update_status()
-
-    def show_next(self) -> None:
-        if self.current_index < len(self.frames) - 1:
-            self.current_index += 1
-            self._apply_default_property(self.current_index)
-            self._show_frame()
-            self._update_status()
-        elif self.playing:
-            self.toggle_play()
-
-    def show_previous(self) -> None:
-        if self.current_index > 0:
-            self.current_index -= 1
-            self._apply_default_property(self.current_index)
-            self._show_frame()
-            self._update_status()
-
-    def toggle_play(self) -> None:
-        self.playing = not self.playing
-        self.play_button.configure(text="Pause" if self.playing else "Play")
+            # Resize to display size while maintaining aspect ratio
+            h, w = img.shape[:2]
+            aspect = w / h
+            if aspect > self.display_size[0] / self.display_size[1]:
+                new_w = self.display_size[0]
+                new_h = int(new_w / aspect)
+            else:
+                new_h = self.display_size[1]
+                new_w = int(new_h * aspect)
+            img = cv2.resize(img, (new_w, new_h))
+        
+        # Add status information
+        status = self._create_status_bar(img.shape[1])
+        
+        # Combine image with status bar
+        combined = np.vstack([img, status])
+        
+        return combined
+    
+    def _create_status_bar(self, width: int) -> np.ndarray:
+        """Create a status bar showing current frame info and controls."""
+        height = 140
+        status_bar = np.ones((height, width, 3), dtype=np.uint8) * 30
+        
+        # Frame info
+        frame_path = self.frames[self.current_index]
+        key = self._frame_key(frame_path)
+        info_text = f"Frame {self.current_index + 1}/{len(self.frames)} | {key}"
+        cv2.putText(status_bar, info_text, (10, 25), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        
+        # Property name and current values
+        current_props = self._get_frame_properties(self.current_index)
+        prop_text = f"Property [{self.property_name}]: {sorted(current_props)}"
+        cv2.putText(status_bar, prop_text, (10, 50), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        # Speed indicator
+        speed_text = f"Speed: {self.speed_multiplier:.1f}x"
+        cv2.putText(status_bar, speed_text, (10, 75), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 1)
+        
+        # Controls help (line 1)
+        help_text1 = "Keys: 1-9:Toggle property | Left/Right:Navigate | Space:Play/Pause"
+        cv2.putText(status_bar, help_text1, (10, 100), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+        
+        # Controls help (line 2)
+        help_text2 = "D:Speed up | A:Speed down | C:Clear all | S:Save | Q:Quit"
+        cv2.putText(status_bar, help_text2, (10, 120), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+        
+        # Playing status
         if self.playing:
-            self._schedule_next_frame()
-
-    def _schedule_next_frame(self) -> None:
-        if not self.playing:
-            return
-        self.root.after(self.interval_ms, self._advance_if_playing)
-
-    def _advance_if_playing(self) -> None:
-        if not self.playing:
-            return
-        if self.current_index < len(self.frames) - 1:
-            self.show_next()
-            self._schedule_next_frame()
-        else:
-            self.toggle_play()
-
+            play_text = f"PLAYING {self.speed_multiplier:.1f}x"
+            cv2.putText(status_bar, play_text, (width - 150, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        return status_bar
+    
+    def _update_delay(self) -> None:
+        """Update the delay based on current FPS and speed multiplier."""
+        effective_fps = self.fps * self.speed_multiplier
+        self.delay_ms = int(1000 / effective_fps) if effective_fps > 0 else 200
+    
     def _save_labels(self) -> None:
-        payload = {self._frame_key(frame): frame.property_value for frame in self.frames if frame.property_value}
+        """Save current labels to JSON file."""
+        # Convert sets to lists for JSON serialization
+        save_data = {}
+        for frame_key, properties in self.labels.items():
+            save_data[frame_key] = {}
+            for prop_name, values in properties.items():
+                save_data[frame_key][prop_name] = sorted(list(values))
+        
         try:
             with self.labels_path.open("w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=2)
+                json.dump(save_data, fh, indent=2)
+            print(f"Labels saved to {self.labels_path}")
         except OSError as exc:
-            messagebox.showerror("Save failed", f"Could not save labels to {self.labels_path}: {exc}")
-
-    def on_close(self) -> None:
+            print(f"Error saving labels: {exc}")
+    
+    def toggle_property(self, value: int) -> None:
+        """Toggle a property value for the current frame."""
+        frame_path = self.frames[self.current_index]
+        key = self._frame_key(frame_path)
+        
+        # Initialize if needed
+        if key not in self.labels:
+            self.labels[key] = {}
+        if self.property_name not in self.labels[key]:
+            self.labels[key][self.property_name] = set()
+        
+        # Toggle the value
+        if value in self.labels[key][self.property_name]:
+            self.labels[key][self.property_name].remove(value)
+            print(f"Removed property {value} from frame {self.current_index + 1}")
+        else:
+            self.labels[key][self.property_name].add(value)
+            print(f"Added property {value} to frame {self.current_index + 1}")
+        
+        self.current_property = value
         self._save_labels()
-        self.root.destroy()
+    
+    def clear_properties(self) -> None:
+        """Clear all properties for the current frame in the current category."""
+        frame_path = self.frames[self.current_index]
+        key = self._frame_key(frame_path)
+        
+        if key in self.labels and self.property_name in self.labels[key]:
+            self.labels[key][self.property_name].clear()
+            print(f"Cleared all properties for frame {self.current_index + 1}")
+            self._save_labels()
+    
+    def change_speed(self, direction: int) -> None:
+        """Change playback speed. direction: 1 for increase, -1 for decrease."""
+        if direction > 0:
+            self.speed_index = min(self.speed_index + 1, len(self.available_speeds) - 1)
+        else:
+            self.speed_index = max(self.speed_index - 1, 0)
+        
+        self.speed_multiplier = self.available_speeds[self.speed_index]
+        self._update_delay()
+        print(f"Playback speed: {self.speed_multiplier:.1f}x")
+    
+    def show_next(self) -> bool:
+        """Move to next frame. Returns False if at the end."""
+        if self.current_index < len(self.frames) - 1:
+            self.current_index += 1
+            return True
+        return False
+    
+    def show_previous(self) -> bool:
+        """Move to previous frame. Returns False if at the beginning."""
+        if self.current_index > 0:
+            self.current_index -= 1
+            return True
+        return False
+    
+    def run(self) -> None:
+        """Main application loop."""
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(self.window_name, self.display_size[0], self.display_size[1] + 140)
+        
+        self._update_delay()
+        
+        print(f"\nFrame Property Labeler - Property: [{self.property_name}]")
+        print("=" * 60)
+        print("Controls:")
+        print("  1-9: Toggle property value for current frame")
+        print("  Left/Right Arrow: Navigate frames")
+        print("  Space: Play/Pause automatic playback")
+        print("  D: Increase playback speed (1x -> 1.5x -> 2x)")
+        print("  A: Decrease playback speed (2x -> 1.5x -> 1x)")
+        print("  C: Clear all properties for current frame")
+        print("  S: Save labels")
+        print("  Q/ESC: Quit")
+        print("=" * 60)
+        print(f"Note: Multiple properties can be assigned to each frame")
+        print(f"Press a number to toggle it on/off for the current frame\n")
+        
+        while True:
+            # Display current frame
+            display_img = self._display_frame()
+            cv2.imshow(self.window_name, display_img)
+            
+            # Handle keyboard input
+            if self.playing:
+                key = cv2.waitKey(self.delay_ms) & 0xFF
+            else:
+                key = cv2.waitKey(0) & 0xFF
+            
+            # Process key
+            if key == ord('q') or key == 27:  # Q or ESC
+                break
+            elif key == ord('s'):  # Save
+                self._save_labels()
+            elif key == ord('c'):  # Clear
+                self.clear_properties()
+            elif key == ord('d'):  # Speed up
+                self.change_speed(1)
+            elif key == ord('a'):  # Speed down
+                self.change_speed(-1)
+            elif key == ord(' '):  # Space - toggle play
+                self.playing = not self.playing
+                if self.playing:
+                    print(f"Playback started at {self.speed_multiplier:.1f}x speed")
+                else:
+                    print("Playback paused")
+            elif key == 81 or key == 2:  # Left arrow
+                if self.show_previous():
+                    self.playing = False
+            elif key == 83 or key == 3:  # Right arrow  
+                if not self.show_next():
+                    self.playing = False
+            elif ord('1') <= key <= ord('9'):  # Number keys
+                value = key - ord('0')
+                self.toggle_property(value)
+            
+            # Auto-advance if playing
+            if self.playing:
+                if not self.show_next():
+                    self.playing = False
+                    print("Reached end of frames")
+        
+        # Cleanup
+        cv2.destroyAllWindows()
+        self._save_labels()
+        print("\nLabels saved. Goodbye!")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Frame property labeling tool")
+    parser = argparse.ArgumentParser(description="Frame property labeling tool using OpenCV")
     parser.add_argument(
         "directory",
-        nargs="?",
+        help="Directory containing frame images."
+    )
+    parser.add_argument(
+        "--property",
+        type=str,
         default=None,
-        help="Directory containing frame images. If omitted, a dialog will open.",
+        help="Name of the property to label (e.g., 'motion', 'quality', 'object'). Will be prompted if not provided."
     )
     parser.add_argument(
         "--labels",
         type=Path,
         default=None,
-        help="Optional path to the labels JSON file (defaults to <directory>/labels.json).",
+        help="Optional path to the labels JSON file (defaults to <directory>/labels.json)."
     )
     parser.add_argument(
         "--fps",
         type=float,
         default=5.0,
-        help="Playback frames per second while playing (default: 5).",
+        help="Base playback frames per second (default: 5). Can be adjusted during playback."
     )
     return parser.parse_args()
 
 
-def choose_directory(start_dir: Optional[str]) -> Optional[Path]:
-    directory = filedialog.askdirectory(initialdir=start_dir or os.getcwd(), title="Select frame directory")
-    if not directory:
-        return None
-    return Path(directory)
-
-
 def main() -> None:
     args = parse_args()
-
-    if args.directory is None:
-        root = tk.Tk()
-        root.withdraw()
-        directory = choose_directory(None)
-        if directory is None:
-            return
-        root.destroy()
-    else:
-        directory = Path(args.directory)
-
+    
+    directory = Path(args.directory)
     if not directory.exists() or not directory.is_dir():
         raise SystemExit(f"Directory not found: {directory}")
-
+    
+    # Get property name
+    property_name = args.property
+    if not property_name:
+        print("\nEnter a name for the property you want to label")
+        print("Examples: 'motion', 'quality', 'person', 'action', etc.")
+        property_name = input("Property name: ").strip()
+        if not property_name:
+            property_name = "default"
+            print(f"Using default property name: {property_name}")
+    
     labels_path = args.labels or directory / "labels.json"
-
-    root = tk.Tk()
-    app = FrameLabelerApp(root, directory, labels_path, fps=args.fps)
-    root.protocol("WM_DELETE_WINDOW", app.on_close)
-    root.mainloop()
+    
+    print(f"\nStarting labeling session for property: [{property_name}]")
+    
+    app = FrameLabelerApp(directory, labels_path, property_name, fps=args.fps)
+    app.run()
 
 
 if __name__ == "__main__":
