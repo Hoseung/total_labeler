@@ -36,9 +36,21 @@ class LabelAnalyzer:
         with self.labels_path.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
         
+        # Handle both new format (with frames/mappings) and legacy format
+        if "frames" in data:
+            # New format
+            frame_data = data["frames"]
+            self.value_mappings = data.get("mappings", {})
+            self.metadata = data.get("metadata", {})
+        else:
+            # Legacy format - frame data is at root level
+            frame_data = data
+            self.value_mappings = {}
+            self.metadata = {}
+        
         # Normalize data structure
         result = {}
-        for frame_key, properties in data.items():
+        for frame_key, properties in frame_data.items():
             if isinstance(properties, dict):
                 # New format: multiple properties
                 result[frame_key] = {}
@@ -220,8 +232,14 @@ class LabelAnalyzer:
             
             legend_elements = []
             for value in sorted(used_values):
+                # Include meaning in legend if available
+                meaning = self.value_mappings.get(prop_name, {}).get(str(value), "")
+                if meaning:
+                    label = f'{value}: {meaning}'
+                else:
+                    label = f'Value {value}'
                 legend_elements.append(
-                    patches.Patch(color=colors[value-1], label=f'Value {value}')
+                    patches.Patch(color=colors[value-1], label=label)
                 )
             
             if legend_elements:
@@ -274,6 +292,20 @@ class LabelAnalyzer:
         print(f"Total frames in sequence: {len(self.frame_sequence)}")
         print(f"Properties found: {len(self.properties)}")
         
+        # Show value mappings if available
+        if hasattr(self, 'value_mappings') and self.value_mappings:
+            print(f"\nValue Mappings:")
+            for prop_name, mappings in self.value_mappings.items():
+                print(f"  {prop_name}:")
+                for value, meaning in mappings.items():
+                    print(f"    {value}: {meaning}")
+        
+        # Show metadata if available
+        if hasattr(self, 'metadata') and self.metadata:
+            version = self.metadata.get('version', 'unknown')
+            created_with = self.metadata.get('created_with', 'unknown')
+            print(f"\nFile Info: {created_with} v{version}")
+        
         for prop_name in sorted(self.properties):
             stat = stats[prop_name]
             state_timeline = self._build_state_timeline(prop_name)
@@ -291,8 +323,17 @@ class LabelAnalyzer:
                 print(f"  State timeline:")
                 for start, end, values in state_timeline[:10]:  # Show first 10 states
                     duration = end - start
-                    values_str = sorted(list(values))
-                    print(f"    Frames {start}-{end-1} ({duration} frames): {values_str}")
+                    
+                    # Format values with meanings
+                    value_displays = []
+                    for value in sorted(values):
+                        meaning = self.value_mappings.get(prop_name, {}).get(str(value), "")
+                        if meaning:
+                            value_displays.append(f"{value}:{meaning}")
+                        else:
+                            value_displays.append(str(value))
+                    
+                    print(f"    Frames {start}-{end-1} ({duration} frames): {value_displays}")
                 if len(state_timeline) > 10:
                     print(f"    ... and {len(state_timeline) - 10} more states")
             

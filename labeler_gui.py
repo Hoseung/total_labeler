@@ -61,6 +61,7 @@ class FrameLabelerApp:
     def _load_existing_labels(self) -> Dict[str, Dict[str, Set[int]]]:
         """Load existing labels. Structure: {frame_key: {property_name: set(values)}}"""
         if not self.labels_path.exists():
+            self.value_mappings = {}
             return {}
         
         try:
@@ -69,14 +70,29 @@ class FrameLabelerApp:
         except json.JSONDecodeError as exc:
             print(f"Failed to read {self.labels_path}: {exc}")
             print("Starting with empty labels.")
+            self.value_mappings = {}
             return {}
+        
+        # Handle both new format (with frames/mappings) and legacy format
+        if "frames" in data:
+            # New format
+            frame_data = data["frames"]
+            self.value_mappings = data.get("mappings", {})
+            if self.property_name in self.value_mappings:
+                print(f"\nLoaded value mappings for '{self.property_name}':")
+                for value, meaning in self.value_mappings[self.property_name].items():
+                    print(f"  {value}: {meaning}")
+        else:
+            # Legacy format - frame data is at root level
+            frame_data = data
+            self.value_mappings = {}
         
         # Convert loaded data to the expected structure
         result = {}
         property_exists = False
         existing_frames_count = 0
         
-        for frame_key, properties in data.items():
+        for frame_key, properties in frame_data.items():
             if isinstance(properties, dict):
                 # New format: multiple properties
                 result[frame_key] = {}
@@ -125,7 +141,42 @@ class FrameLabelerApp:
                 self.replace_property = False
                 print(f"Will keep and show existing values for property '{self.property_name}'")
         
+        # Ask for value mappings if not already defined for this property
+        if (self.property_name not in self.value_mappings or 
+            not self.value_mappings.get(self.property_name, {})):
+            self._setup_value_mappings()
+        
         return result
+    
+    def _setup_value_mappings(self) -> None:
+        """Set up value mappings for the current property."""
+        print(f"\nDefine value meanings for property '{self.property_name}':")
+        print("You can define what each number (1-9) means for this property.")
+        print("Press Enter to skip a value, or type 'done' to finish early.")
+        print("Examples: 1='empty', 2='full', 3='invalid'")
+        
+        if self.property_name not in self.value_mappings:
+            self.value_mappings[self.property_name] = {}
+        
+        for i in range(1, 10):
+            current_meaning = self.value_mappings[self.property_name].get(str(i), "")
+            if current_meaning:
+                prompt = f"  Value {i} (currently '{current_meaning}'): "
+            else:
+                prompt = f"  Value {i}: "
+            
+            meaning = input(prompt).strip()
+            if meaning.lower() == 'done':
+                break
+            elif meaning:
+                self.value_mappings[self.property_name][str(i)] = meaning
+            elif str(i) in self.value_mappings[self.property_name]:
+                # Keep existing mapping if user pressed enter
+                pass
+        
+        print(f"\nValue mappings for '{self.property_name}':")
+        for value, meaning in self.value_mappings[self.property_name].items():
+            print(f"  {value}: {meaning}")
     
     def _frame_key(self, frame_path: Path) -> str:
         return frame_path.relative_to(self.image_dir).as_posix()
@@ -189,10 +240,19 @@ class FrameLabelerApp:
         # Property name and current values
         current_props = self._get_frame_properties(self.current_index)
         
+        # Create value display with meanings
+        prop_values_display = []
+        for value in sorted(current_props):
+            meaning = self.value_mappings.get(self.property_name, {}).get(str(value), "")
+            if meaning:
+                prop_values_display.append(f"{value}:{meaning}")
+            else:
+                prop_values_display.append(str(value))
+        
         # Enhanced property display when keeping existing values
         if self.replace_property is False and current_props:
             # Show existing values more prominently
-            prop_text = f"Property [{self.property_name}] (EXISTING): {sorted(current_props)}"
+            prop_text = f"Property [{self.property_name}] (EXISTING): {prop_values_display}"
             # Use cyan color for existing values
             cv2.putText(status_bar, prop_text, (10, 50), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
@@ -201,7 +261,7 @@ class FrameLabelerApp:
             cv2.putText(status_bar, "* Existing data - Toggle numbers to modify", (10, 75), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
         else:
-            prop_text = f"Property [{self.property_name}]: {sorted(current_props)}"
+            prop_text = f"Property [{self.property_name}]: {prop_values_display}"
             cv2.putText(status_bar, prop_text, (10, 50), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         
@@ -239,11 +299,23 @@ class FrameLabelerApp:
     def _save_labels(self) -> None:
         """Save current labels to JSON file."""
         # Convert sets to lists for JSON serialization
-        save_data = {}
+        frame_data = {}
         for frame_key, properties in self.labels.items():
-            save_data[frame_key] = {}
+            frame_data[frame_key] = {}
             for prop_name, values in properties.items():
-                save_data[frame_key][prop_name] = sorted(list(values))
+                frame_data[frame_key][prop_name] = sorted(list(values))
+        
+        # Create complete save data structure with mappings
+        save_data = {
+            "frames": frame_data,
+            "mappings": getattr(self, 'value_mappings', {}),
+            "metadata": {
+                "created_with": "frame_property_labeler",
+                "version": "2.0",
+                "total_frames": len(self.frames),
+                "properties": list(self.labels.keys()) if hasattr(self, 'labels') else []
+            }
+        }
         
         try:
             with self.labels_path.open("w", encoding="utf-8") as fh:
