@@ -1,0 +1,15 @@
+[project]
+name = "frame-property-labeler"
+version = "0.1.0"
+description = "Tkinter app for labeling frame images with numeric properties"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "pillow>=10.0.0",
+]
+
+[project.scripts]
+frame-labeler = "labeler_gui:main"
+
+[tool.uv]
+package = true
