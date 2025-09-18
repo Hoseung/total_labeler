@@ -30,6 +30,7 @@ class FrameLabelerApp:
         self.speed_multiplier = 1.0
         self.available_speeds = [1.0, 1.5, 2.0]
         self.speed_index = 0
+        self.replace_property = None  # Will be set during label loading
         
         self.frames: List[Path] = self._load_frames()
         if not self.frames:
@@ -61,6 +62,7 @@ class FrameLabelerApp:
         """Load existing labels. Structure: {frame_key: {property_name: set(values)}}"""
         if not self.labels_path.exists():
             return {}
+        
         try:
             with self.labels_path.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -71,6 +73,9 @@ class FrameLabelerApp:
         
         # Convert loaded data to the expected structure
         result = {}
+        property_exists = False
+        existing_frames_count = 0
+        
         for frame_key, properties in data.items():
             if isinstance(properties, dict):
                 # New format: multiple properties
@@ -81,9 +86,44 @@ class FrameLabelerApp:
                     else:
                         # Single value, convert to set
                         result[frame_key][prop_name] = {values}
+                    
+                    # Check if current property already exists
+                    if prop_name == self.property_name:
+                        property_exists = True
+                        existing_frames_count += 1
             else:
                 # Old format: single unnamed property
                 result[frame_key] = {"default": {properties}}
+                if self.property_name == "default":
+                    property_exists = True
+                    existing_frames_count += 1
+        
+        # Ask about property replacement if this property already exists
+        if property_exists:
+            print(f"\nFound existing property '{self.property_name}' in {existing_frames_count} frames.")
+            print("Options:")
+            print("  1. Keep existing - Augment/modify existing values (recommended)")
+            print("  2. Replace all - Clear all existing values for this property")
+            print("  3. Cancel - Exit without changes")
+            
+            while True:
+                choice = input("Choose option (1/2/3) [default: 1]: ").strip() or "1"
+                if choice in ["1", "2", "3"]:
+                    break
+                print("Invalid choice. Please enter 1, 2, or 3.")
+            
+            if choice == "3":
+                raise SystemExit("Cancelled by user")
+            elif choice == "2":
+                # Clear existing property values
+                for frame_key in result:
+                    if self.property_name in result[frame_key]:
+                        result[frame_key][self.property_name].clear()
+                print(f"Cleared all existing values for property '{self.property_name}'")
+                self.replace_property = True
+            else:
+                self.replace_property = False
+                print(f"Will keep and show existing values for property '{self.property_name}'")
         
         return result
     
@@ -136,7 +176,7 @@ class FrameLabelerApp:
     
     def _create_status_bar(self, width: int) -> np.ndarray:
         """Create a status bar showing current frame info and controls."""
-        height = 140
+        height = 160  # Increased height for better property visualization
         status_bar = np.ones((height, width, 3), dtype=np.uint8) * 30
         
         # Frame info
@@ -148,23 +188,39 @@ class FrameLabelerApp:
         
         # Property name and current values
         current_props = self._get_frame_properties(self.current_index)
-        prop_text = f"Property [{self.property_name}]: {sorted(current_props)}"
-        cv2.putText(status_bar, prop_text, (10, 50), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        # Enhanced property display when keeping existing values
+        if self.replace_property is False and current_props:
+            # Show existing values more prominently
+            prop_text = f"Property [{self.property_name}] (EXISTING): {sorted(current_props)}"
+            # Use cyan color for existing values
+            cv2.putText(status_bar, prop_text, (10, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+            
+            # Add visual indicator for existing data
+            cv2.putText(status_bar, "* Existing data - Toggle numbers to modify", (10, 75), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+        else:
+            prop_text = f"Property [{self.property_name}]: {sorted(current_props)}"
+            cv2.putText(status_bar, prop_text, (10, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         
         # Speed indicator
         speed_text = f"Speed: {self.speed_multiplier:.1f}x"
-        cv2.putText(status_bar, speed_text, (10, 75), 
+        y_offset = 95 if self.replace_property is False and current_props else 75
+        cv2.putText(status_bar, speed_text, (10, y_offset), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 1)
         
         # Controls help (line 1)
+        y_offset += 25
         help_text1 = "Keys: 1-9:Toggle property | Left/Right:Navigate | Space:Play/Pause"
-        cv2.putText(status_bar, help_text1, (10, 100), 
+        cv2.putText(status_bar, help_text1, (10, y_offset), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
         
         # Controls help (line 2)
+        y_offset += 20
         help_text2 = "D:Speed up | A:Speed down | C:Clear all | S:Save | Q:Quit"
-        cv2.putText(status_bar, help_text2, (10, 120), 
+        cv2.putText(status_bar, help_text2, (10, y_offset), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
         
         # Playing status
@@ -256,7 +312,7 @@ class FrameLabelerApp:
     def run(self) -> None:
         """Main application loop."""
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(self.window_name, self.display_size[0], self.display_size[1] + 140)
+        cv2.resizeWindow(self.window_name, self.display_size[0], self.display_size[1] + 160)
         
         self._update_delay()
         

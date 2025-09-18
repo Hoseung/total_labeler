@@ -1,60 +1,124 @@
 # Frame Property Labeler
 
-A lightweight Tkinter GUI for quickly reviewing a directory of frame images and assigning each frame a numeric property (1-9). The label for each frame defaults to the previous frame’s value, making it easy to tag contiguous sequences with minimal effort.
+A comprehensive tool for labeling frame properties in image sequences with visualization and analysis capabilities.
 
-## Features
-- Display frames from a directory and step through them one by one.
-- Start, pause, and resume playback at a configurable frame rate.
-- Assign properties with on-screen radio buttons or number key shortcuts (1-9).
-- Automatically inherit the previous frame’s property when moving forward.
-- Persist labels to JSON on every change and via a manual **Save** button.
-- Resume work later by reloading the labels file.
+## Tools
+
+### 1. `labeler_gui.py` - Interactive Frame Labeler
+
+Label frames with multiple properties using an OpenCV-based GUI.
+
+```bash
+# Start labeling with property name
+python3 labeler_gui.py /path/to/frames --property motion
+
+# Interactive property name selection
+python3 labeler_gui.py /path/to/frames
+
+# Custom FPS and labels file
+python3 labeler_gui.py /path/to/frames --property quality --fps 10 --labels custom_labels.json
+```
+
+#### Features:
+- **Multiple Properties**: Each frame can have multiple values per property (e.g., motion=[1,3,5])
+- **Property Sessions**: Name your properties (motion, quality, person, etc.)
+- **Smart Property Handling**: Detects existing properties and asks whether to keep or replace
+- **Variable Playback Speed**: 1x, 1.5x, 2x (D/A keys)
+- **Toggle-based Labeling**: Press 1-9 to toggle property values on/off
+
+#### Controls:
+- **1-9**: Toggle property value for current frame
+- **Left/Right Arrow**: Navigate frames
+- **Space**: Play/Pause automatic playback
+- **D**: Increase playback speed
+- **A**: Decrease playback speed
+- **C**: Clear all properties for current frame
+- **S**: Save labels
+- **Q/ESC**: Quit
+
+### 2. `analyze_labels.py` - Label Analysis and Visualization
+
+Analyze and visualize labeled data to understand completeness and patterns.
+
+```bash
+# Basic analysis
+python3 analyze_labels.py /path/to/labels.json
+
+# Include image directory for complete frame analysis
+python3 analyze_labels.py /path/to/labels.json --image-dir /path/to/frames
+
+# Save plot to file
+python3 analyze_labels.py /path/to/labels.json --save analysis.png
+
+# Save only (don't show)
+python3 analyze_labels.py /path/to/labels.json --save analysis.png --no-show
+```
+
+#### Features:
+- **Line Plots**: Visualize property values across frame sequence
+- **Completeness Analysis**: See percentage of labeled frames per property
+- **Gap Detection**: Identify unlabeled regions in sequences
+- **Multi-Property Support**: Analyze all properties in one view
+- **Statistics**: Detailed statistics about labeling completeness
+
+#### Output:
+- **Visual Plot**: Line plot showing property values over time
+- **Completeness Stats**: Percentage of frames labeled per property
+- **Gap Analysis**: Lists of consecutive unlabeled frame ranges
+- **Value Distribution**: Average values per labeled frame
+
+## Data Format
+
+Labels are stored in JSON format:
+
+```json
+{
+  "frame001.jpg": {
+    "motion": [1, 3, 5],
+    "quality": [8, 9],
+    "person": [2]
+  },
+  "frame002.jpg": {
+    "motion": [1, 2],
+    "quality": [7]
+  }
+}
+```
+
+## Workflow Example
+
+1. **First Pass - Motion Labeling**:
+   ```bash
+   python3 labeler_gui.py frames/ --property motion
+   ```
+
+2. **Second Pass - Quality Assessment**:
+   ```bash
+   python3 labeler_gui.py frames/ --property quality
+   ```
+
+3. **Refinement - Update Motion**:
+   ```bash
+   python3 labeler_gui.py frames/ --property motion
+   # Choose "Keep existing" to see and modify previous labels
+   ```
+
+4. **Analysis**:
+   ```bash
+   python3 analyze_labels.py frames/labels.json --image-dir frames/
+   ```
 
 ## Requirements
-- Python 3.8+
-- [Pillow](https://python-pillow.org/) for image loading
+- Python 3.7+
+- OpenCV (cv2)
+- NumPy  
+- Matplotlib (for analysis tool)
 
 Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
-
-## Usage
-The tool accepts the directory containing your frame images and will save labels to `labels.json` inside that directory by default.
-
-```bash
-python3 labeler_gui.py /path/to/frame_directory
-```
-
-Optional arguments:
-
-- `--labels /path/to/file.json` – custom output file for saved labels.
-- `--fps 8` – playback rate in frames per second while in Play mode (default: 5).
-
-If you omit the directory argument, a folder picker dialog will open.
-
-## Supported Images
-Files with extensions `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tiff`, or `.tif` are loaded in alphanumeric order.
-
-## Controls
-- **Play/Pause** button or spacebar – start or stop playback.
-- **Prev/Next** buttons or left/right arrow keys – step one frame at a time.
-- **Number keys 1-9** or radio buttons – set the current frame’s property.
-- **Save** button – persist labels immediately (auto-save also occurs on each change and when exiting).
-
-## Output Format
-Labels are written as JSON with frame paths relative to the selected directory:
-
-```json
-{
-  "frame_0001.png": 3,
-  "frame_0002.png": 3,
-  "frame_0003.png": 5
-}
-```
-
-Reopening the same directory reuses existing labels so you can continue where you left off.
 
 ## UV Environment
 Use [uv](https://docs.astral.sh/uv/) to manage the virtual environment and dependencies. The project already includes a `pyproject.toml` and `uv.lock` created with `uv` so you can get started with a single command.
