@@ -31,11 +31,19 @@ class FrameLabelerApp:
         self.available_speeds = [1.0, 1.5, 2.0]
         self.speed_index = 0
         self.replace_property = None  # Will be set during label loading
-        
+
         self.frames: List[Path] = self._load_frames()
         if not self.frames:
             raise SystemExit(f"No image frames found in {image_dir}")
-        
+
+        # Initialize display settings before preloading
+        self.display_size = (1920, 1080)
+
+        # Preload all images into memory
+        print(f"\nLoading {len(self.frames)} images into memory...")
+        self.cached_images: Dict[int, np.ndarray] = {}
+        self._preload_images()
+
         self.labels: Dict[str, Dict[str, Set[int]]] = self._load_existing_labels()
         
         # Always set up value mappings if not already defined for this property
@@ -46,7 +54,6 @@ class FrameLabelerApp:
         self.current_index = 0
         self.current_property = 1
         self.playing = False
-        self.display_size = (1920, 1080)
         self.window_name = f"Frame Property Labeler - {property_name}"
         
         # Apply default properties from existing labels
@@ -63,6 +70,40 @@ class FrameLabelerApp:
             if path.suffix.lower() in SUPPORTED_EXTENSIONS and path.is_file()
         ]
         return files
+
+    def _preload_images(self) -> None:
+        """Preload all images into memory for faster navigation."""
+        total = len(self.frames)
+        for i, frame_path in enumerate(self.frames):
+            # Show progress
+            if i % 10 == 0 or i == total - 1:
+                print(f"  Loading image {i + 1}/{total} ({(i + 1) * 100 // total}%)...", end="\r")
+
+            # Load and resize image
+            img = cv2.imread(str(frame_path))
+
+            if img is None:
+                # Create placeholder for broken images
+                img = np.zeros((100, 200, 3), dtype=np.uint8)
+                cv2.putText(img, "Error loading image", (10, 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            else:
+                # Resize to display size while maintaining aspect ratio
+                h, w = img.shape[:2]
+                aspect = w / h
+                if aspect > self.display_size[0] / self.display_size[1]:
+                    new_w = self.display_size[0]
+                    new_h = int(new_w / aspect)
+                else:
+                    new_h = self.display_size[1]
+                    new_w = int(new_h * aspect)
+                img = cv2.resize(img, (new_w, new_h))
+
+            self.cached_images[i] = img
+
+        print(f"\n  Successfully loaded all {total} images into memory!")
+        memory_usage_mb = sum(img.nbytes for img in self.cached_images.values()) / (1024 * 1024)
+        print(f"  Memory usage: ~{memory_usage_mb:.1f} MB")
     
     def _load_existing_labels(self) -> Dict[str, Dict[str, Set[int]]]:
         """Load existing labels. Structure: {frame_key: {property_name: set(values)}}"""
@@ -209,26 +250,9 @@ class FrameLabelerApp:
         return {self.current_property}
     
     def _display_frame(self) -> np.ndarray:
-        """Load and prepare the current frame for display."""
-        frame_path = self.frames[self.current_index]
-        img = cv2.imread(str(frame_path))
-        
-        if img is None:
-            # Create placeholder for broken images
-            img = np.zeros((100, 200, 3), dtype=np.uint8)
-            cv2.putText(img, "Error loading image", (10, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        else:
-            # Resize to display size while maintaining aspect ratio
-            h, w = img.shape[:2]
-            aspect = w / h
-            if aspect > self.display_size[0] / self.display_size[1]:
-                new_w = self.display_size[0]
-                new_h = int(new_w / aspect)
-            else:
-                new_h = self.display_size[1]
-                new_w = int(new_h * aspect)
-            img = cv2.resize(img, (new_w, new_h))
+        """Get the preloaded frame for display."""
+        # Use cached image instead of loading from disk
+        img = self.cached_images[self.current_index].copy()
         
         # Add status information
         status = self._create_status_bar(img.shape[1])
