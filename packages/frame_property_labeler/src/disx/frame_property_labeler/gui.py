@@ -2,17 +2,17 @@
 """Simple GUI tool for labeling frame properties using OpenCV.
 
 The tool iterates through image frames inside a directory, displays them, and
-lets the user assign numeric properties (1-9) to each frame. Supports multiple
-named properties per frame and variable playback speeds.
+lets the user assign numeric properties (1-9) to each frame. Each property can
+have only one value at a time (mutually exclusive). Supports multiple named 
+properties per frame and variable playback speeds.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set
 
 import cv2
 import numpy as np
@@ -37,6 +37,12 @@ class FrameLabelerApp:
             raise SystemExit(f"No image frames found in {image_dir}")
         
         self.labels: Dict[str, Dict[str, Set[int]]] = self._load_existing_labels()
+        
+        # Always set up value mappings if not already defined for this property
+        if (self.property_name not in self.value_mappings or 
+            not self.value_mappings.get(self.property_name, {})):
+            self._setup_value_mappings()
+        
         self.current_index = 0
         self.current_property = 1
         self.playing = False
@@ -141,19 +147,19 @@ class FrameLabelerApp:
                 self.replace_property = False
                 print(f"Will keep and show existing values for property '{self.property_name}'")
         
-        # Ask for value mappings if not already defined for this property
-        if (self.property_name not in self.value_mappings or 
-            not self.value_mappings.get(self.property_name, {})):
-            self._setup_value_mappings()
-        
         return result
     
     def _setup_value_mappings(self) -> None:
         """Set up value mappings for the current property."""
-        print(f"\nDefine value meanings for property '{self.property_name}':")
-        print("You can define what each number (1-9) means for this property.")
-        print("Press Enter to skip a value, or type 'done' to finish early.")
-        print("Examples: 1='empty', 2='full', 3='invalid'")
+        print(f"\n{'='*60}")
+        print(f"Setting up value meanings for property: '{self.property_name}'")
+        print("="*60)
+        print("Define what each number (1-9) means for this property.")
+        print("This helps make your labels more readable and meaningful.")
+        print("  - Press Enter to skip a value")
+        print("  - Type 'done' to finish early") 
+        print("  - Type 'skip' to skip all mappings")
+        print("\nExamples: 1='slow', 2='medium', 3='fast'")
         
         if self.property_name not in self.value_mappings:
             self.value_mappings[self.property_name] = {}
@@ -166,7 +172,11 @@ class FrameLabelerApp:
                 prompt = f"  Value {i}: "
             
             meaning = input(prompt).strip()
-            if meaning.lower() == 'done':
+            if meaning.lower() == 'skip':
+                print("Skipping all value mappings.")
+                self.value_mappings[self.property_name] = {}
+                return
+            elif meaning.lower() == 'done':
                 break
             elif meaning:
                 self.value_mappings[self.property_name][str(i)] = meaning
@@ -174,9 +184,12 @@ class FrameLabelerApp:
                 # Keep existing mapping if user pressed enter
                 pass
         
-        print(f"\nValue mappings for '{self.property_name}':")
-        for value, meaning in self.value_mappings[self.property_name].items():
-            print(f"  {value}: {meaning}")
+        if self.value_mappings[self.property_name]:
+            print(f"\nValue mappings for '{self.property_name}':")
+            for value, meaning in sorted(self.value_mappings[self.property_name].items()):
+                print(f"  {value}: {meaning}")
+        else:
+            print(f"\nNo value mappings defined for '{self.property_name}'.")
     
     def _frame_key(self, frame_path: Path) -> str:
         return frame_path.relative_to(self.image_dir).as_posix()
@@ -258,7 +271,7 @@ class FrameLabelerApp:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
             
             # Add visual indicator for existing data
-            cv2.putText(status_bar, "* Existing data - Toggle numbers to modify", (10, 75), 
+            cv2.putText(status_bar, "* Existing data - Press numbers to set (exclusive)", (10, 75), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
         else:
             prop_text = f"Property [{self.property_name}]: {prop_values_display}"
@@ -273,7 +286,7 @@ class FrameLabelerApp:
         
         # Controls help (line 1)
         y_offset += 25
-        help_text1 = "Keys: 1-9:Toggle property | Left/Right:Navigate | Space:Play/Pause"
+        help_text1 = "Keys: 1-9:Set property (exclusive) | Left/Right:Navigate | Space:Play/Pause"
         cv2.putText(status_bar, help_text1, (10, y_offset), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
         
@@ -325,7 +338,7 @@ class FrameLabelerApp:
             print(f"Error saving labels: {exc}")
     
     def toggle_property(self, value: int) -> None:
-        """Toggle a property value for the current frame."""
+        """Toggle a property value for the current frame. Values are mutually exclusive."""
         frame_path = self.frames[self.current_index]
         key = self._frame_key(frame_path)
         
@@ -335,13 +348,17 @@ class FrameLabelerApp:
         if self.property_name not in self.labels[key]:
             self.labels[key][self.property_name] = set()
         
-        # Toggle the value
-        if value in self.labels[key][self.property_name]:
-            self.labels[key][self.property_name].remove(value)
+        # For exclusive values: clear existing value and set new one
+        current_values = self.labels[key][self.property_name]
+        
+        if value in current_values:
+            # If clicking the same value, remove it (toggle off)
+            self.labels[key][self.property_name].clear()
             print(f"Removed property {value} from frame {self.current_index + 1}")
         else:
-            self.labels[key][self.property_name].add(value)
-            print(f"Added property {value} to frame {self.current_index + 1}")
+            # Clear any existing value and set the new one
+            self.labels[key][self.property_name] = {value}
+            print(f"Set property {value} for frame {self.current_index + 1}")
         
         self.current_property = value
         self._save_labels()
@@ -391,7 +408,7 @@ class FrameLabelerApp:
         print(f"\nFrame Property Labeler - Property: [{self.property_name}]")
         print("=" * 60)
         print("Controls:")
-        print("  1-9: Toggle property value for current frame")
+        print("  1-9: Set property value for current frame (exclusive)")
         print("  Left/Right Arrow: Navigate frames")
         print("  Space: Play/Pause automatic playback")
         print("  D: Increase playback speed (1x -> 1.5x -> 2x)")
@@ -401,7 +418,7 @@ class FrameLabelerApp:
         print("  Q/ESC: Quit")
         print("=" * 60)
         print(f"Note: Multiple properties can be assigned to each frame")
-        print(f"Press a number to toggle it on/off for the current frame\n")
+        print(f"Press a number to set it for the current frame (only one value per property)\n")
         
         while True:
             # Display current frame

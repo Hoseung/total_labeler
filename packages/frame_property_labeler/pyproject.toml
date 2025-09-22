@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frame-property-labeler"
+version = "0.1.0"
+description = "Tkinter app for labeling frame images with numeric properties"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pillow>=10.0.0",
+    "numpy>=1.21.0",
+    "opencv-python>=4.5.0",
+    "matplotlib>=3.5.0",
+]
+
+[project.scripts]
+frame-labeler = "disx.frame_property_labeler.gui:main"
+frame-labeler-analyze = "disx.frame_property_labeler.analyze:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["disx*"]

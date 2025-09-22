@@ -1,15 +1,40 @@
 [project]
-name = "frame-property-labeler"
-version = "0.1.0"
-description = "Tkinter app for labeling frame images with numeric properties"
+name = "dis-dev"
+version = "0.0.0"
+description = "Development environment for dis monorepo"
 readme = "README.md"
-requires-python = ">=3.8"
-dependencies = [
-  "pillow>=10.0.0",
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0.0",
 ]
 
-[project.scripts]
-frame-labeler = "labeler_gui:main"
-
 [tool.uv]
-package = true
+dev-dependencies = [
+    "frame-property-labeler @ file:///${PROJECT_ROOT}/packages/frame_property_labeler",
+]
+
+[tool.uv.sources]
+frame-property-labeler = { path = "packages/frame_property_labeler", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["packages/*/tests"]
+python_files = ["test_*.py", "*_test.py"]
