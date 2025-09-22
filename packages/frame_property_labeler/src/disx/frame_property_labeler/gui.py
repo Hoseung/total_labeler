@@ -46,7 +46,7 @@ class FrameLabelerApp:
         self.current_index = 0
         self.current_property = 1
         self.playing = False
-        self.display_size = (960, 540)
+        self.display_size = (1920, 1080)
         self.window_name = f"Frame Property Labeler - {property_name}"
         
         # Apply default properties from existing labels
