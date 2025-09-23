@@ -310,14 +310,14 @@ class FrameLabelerApp:
         
         # Controls help (line 1)
         y_offset += 25
-        help_text1 = "Keys: 1-9:Set property (exclusive) | Left/Right:Navigate | Space:Play/Pause"
-        cv2.putText(status_bar, help_text1, (10, y_offset), 
+        help_text1 = "Keys: 1-9:Set property | Left/Right:Navigate | PgUp/PgDn:Skip 100 | Space:Play/Pause"
+        cv2.putText(status_bar, help_text1, (10, y_offset),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
-        
+
         # Controls help (line 2)
         y_offset += 20
         help_text2 = "D:Speed up | A:Speed down | C:Clear all | S:Save | Q:Quit"
-        cv2.putText(status_bar, help_text2, (10, y_offset), 
+        cv2.putText(status_bar, help_text2, (10, y_offset),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
         
         # Playing status
@@ -421,6 +421,22 @@ class FrameLabelerApp:
             self.current_index -= 1
             return True
         return False
+
+    def skip_frames(self, count: int) -> bool:
+        """Skip multiple frames forward or backward. Returns False if can't skip."""
+        new_index = self.current_index + count
+        if 0 <= new_index < len(self.frames):
+            self.current_index = new_index
+            return True
+        elif count > 0 and new_index >= len(self.frames):
+            # Go to last frame if trying to skip past the end
+            self.current_index = len(self.frames) - 1
+            return True
+        elif count < 0 and new_index < 0:
+            # Go to first frame if trying to skip before beginning
+            self.current_index = 0
+            return True
+        return False
     
     def run(self) -> None:
         """Main application loop."""
@@ -434,6 +450,7 @@ class FrameLabelerApp:
         print("Controls:")
         print("  1-9: Set property value for current frame (exclusive)")
         print("  Left/Right Arrow: Navigate frames")
+        print("  Page Up/Page Down: Skip 100 frames backward/forward")
         print("  Space: Play/Pause automatic playback")
         print("  D: Increase playback speed (1x -> 1.5x -> 2x)")
         print("  A: Decrease playback speed (2x -> 1.5x -> 1x)")
@@ -475,9 +492,17 @@ class FrameLabelerApp:
             elif key == 81 or key == 2:  # Left arrow
                 if self.show_previous():
                     self.playing = False
-            elif key == 83 or key == 3:  # Right arrow  
+            elif key == 83 or key == 3:  # Right arrow
                 if not self.show_next():
                     self.playing = False
+            elif key == 85 or key == 5:  # Page Up - skip 100 frames backward
+                if self.skip_frames(-100):
+                    self.playing = False
+                    print(f"Skipped to frame {self.current_index + 1}/{len(self.frames)}")
+            elif key == 86 or key == 6:  # Page Down - skip 100 frames forward
+                if self.skip_frames(100):
+                    self.playing = False
+                    print(f"Skipped to frame {self.current_index + 1}/{len(self.frames)}")
             elif ord('1') <= key <= ord('9'):  # Number keys
                 value = key - ord('0')
                 self.toggle_property(value)
