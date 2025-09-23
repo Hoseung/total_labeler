@@ -16,10 +16,12 @@ dev = [
 [tool.uv]
 dev-dependencies = [
     "frame-property-labeler @ file:///${PROJECT_ROOT}/packages/frame_property_labeler",
+    "compare-results @ file:///${PROJECT_ROOT}/packages/compare_results",
 ]
 
 [tool.uv.sources]
 frame-property-labeler = { path = "packages/frame_property_labeler", editable = true }
+compare-results = { path = "packages/compare_results", editable = true }
 
 [tool.ruff]
 line-length = 100

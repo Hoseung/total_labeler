@@ -1,0 +1,17 @@
+[project]
+name = "compare-results"
+version = "0.1.0"
+description = "Tool for comparing algorithm results with ground truth annotations"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0.0",
+    "matplotlib>=3.5.0",
+    "numpy>=1.20.0",
+]
+
+[project.scripts]
+compare_results = "compare_results.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
