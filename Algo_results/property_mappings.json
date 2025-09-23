@@ -1,0 +1,53 @@
+{
+  "properties": {
+    "driver_seatbelt": {
+      "description": "Driver seatbelt wearing status",
+      "gt_to_algo_mapping": {
+        "1": "unbelt",
+        "2": "belt",
+        "3": "misuse",
+        "4": "unbbelt"
+      },
+      "algo_extraction_path": ["body", "[0]", "seatbelt", "seat1", "state"],
+      "notes": "Maps ground truth values (1=none, 2=good, 3=bad, 4=invalid) to algorithm states"
+    },
+    "passenger_seatbelt": {
+      "description": "Passenger seatbelt wearing status",
+      "gt_to_algo_mapping": {
+        "1": "unbelt",
+        "2": "belt",
+        "3": "misuse",
+        "4": "unbbelt"
+      },
+      "algo_extraction_path": ["body", "[0]", "seatbelt", "seat2", "state"],
+      "notes": "Maps ground truth values for passenger seat"
+    },
+    "driver_phone": {
+      "description": "Driver phone usage detection",
+      "gt_to_algo_mapping": {
+        "0": "no_phone",
+        "1": "phone_use"
+      },
+      "algo_extraction_path": ["body", "[0]", "phone", "detected"],
+      "notes": "Example mapping for phone detection"
+    },
+    "driver_smoking": {
+      "description": "Driver smoking detection",
+      "gt_to_algo_mapping": {
+        "0": "not_smoking",
+        "1": "smoking"
+      },
+      "algo_extraction_path": ["body", "[0]", "smoking", "detected"],
+      "notes": "Example mapping for smoking detection"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "description": "Configuration for mapping ground truth annotations to algorithm detection results",
+    "notes": [
+      "gt_to_algo_mapping: Maps ground truth values (keys) to algorithm state names (values)",
+      "algo_extraction_path: JSON path to extract algorithm result from per-frame files",
+      "Array indices in extraction path should be specified as '[index]'"
+    ]
+  }
+}
