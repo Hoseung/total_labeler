@@ -1,0 +1,35 @@
+{
+  "frames": {
+    "img_20250918_144145_2560_1984_1E_00000.bmp": {
+      "calling": [
+        1
+      ]
+    },
+    "img_20250918_144146_2560_1984_1E_00010.bmp": {
+      "calling": [
+        2
+      ]
+    },
+    "img_20250918_144221_2560_1984_1E_00547.bmp": {
+      "calling": [
+        1
+      ]
+    }
+  },
+  "mappings": {
+    "calling": {
+      "1": "false",
+      "2": "true"
+    }
+  },
+  "metadata": {
+    "created_with": "frame_property_labeler",
+    "version": "2.0",
+    "total_frames": 894,
+    "properties": [
+      "img_20250918_144145_2560_1984_1E_00000.bmp",
+      "img_20250918_144146_2560_1984_1E_00010.bmp",
+      "img_20250918_144221_2560_1984_1E_00547.bmp"
+    ]
+  }
+}

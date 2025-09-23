@@ -1,0 +1,29 @@
+{
+  "frames": {
+    "img_20250918_150110_2560_1984_1E_00000.bmp": {
+      "calling": [
+        2
+      ]
+    },
+    "img_20250918_150147_2560_1984_1E_00558.bmp": {
+      "calling": [
+        1
+      ]
+    }
+  },
+  "mappings": {
+    "calling": {
+      "1": "false",
+      "2": "true"
+    }
+  },
+  "metadata": {
+    "created_with": "frame_property_labeler",
+    "version": "2.0",
+    "total_frames": 801,
+    "properties": [
+      "img_20250918_150110_2560_1984_1E_00000.bmp",
+      "img_20250918_150147_2560_1984_1E_00558.bmp"
+    ]
+  }
+}
