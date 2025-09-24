@@ -39,6 +39,17 @@
       },
       "algo_extraction_path": ["body", "[0]", "smoking", "detected"],
       "notes": "Example mapping for smoking detection"
+    },
+    "handle": {
+      "description": "Handle presence detection",
+      "gt_to_algo_mapping": {
+        "1": "one",
+        "2": "both",
+        "3": "none",
+        "4": "unknown"
+      },
+      "algo_extraction_path": ["body", "[0]", "handle", "state"],
+      "notes": "Maps ground truth values (1=one, 2=both, 3=none, 4=unknown) to algorithm states"
     }
   },
   "metadata": {

@@ -99,7 +99,7 @@ def load_ground_truth(filepath: str, property_name: str, config: Dict[str, Any])
     print("\nGround truth state distribution:")
     for state, count in sorted(state_counts.items()):
         percentage = count / len(states) * 100
-        print(f"  {state:15s}: {count:5d} ({percentage:5.1f}%)")
+        print(f"  {str(state):15s}: {count:5d} ({percentage:5.1f}%)")
 
     return states, {
         'total_frames': total_frames,
@@ -128,6 +128,16 @@ def load_algorithm_results(directory: str, property_name: str, config: Dict[str,
     property_config = config['properties'][property_name]
     extraction_path = property_config['algo_extraction_path']
 
+    # Build reverse mapping once if needed
+    reverse_map = {}
+    if 'gt_to_algo_mapping' in property_config:
+        for gt_val, state_name in property_config['gt_to_algo_mapping'].items():
+            try:
+                algo_val = int(gt_val)
+                reverse_map[algo_val] = state_name
+            except ValueError:
+                pass
+
     states = []
     error_count = 0
 
@@ -146,6 +156,20 @@ def load_algorithm_results(directory: str, property_name: str, config: Dict[str,
                 else:
                     # Dictionary key
                     value = value[key]
+
+            # Map algorithm states to ground truth format
+            if 'algo_to_gt_mapping' in property_config:
+                # Use direct algo to gt mapping if available
+                value = property_config['algo_to_gt_mapping'].get(str(value), str(value))
+            elif reverse_map:
+                # Use pre-built reverse mapping
+                if isinstance(value, int) and value in reverse_map:
+                    value = reverse_map[value]
+                else:
+                    value = str(value)
+            else:
+                # Ensure value is string
+                value = str(value)
 
             states.append(value)
 
@@ -168,7 +192,7 @@ def load_algorithm_results(directory: str, property_name: str, config: Dict[str,
     print("\nAlgorithm state distribution:")
     for state, count in sorted(state_counts.items()):
         percentage = count / len(states) * 100
-        print(f"  {state:15s}: {count:5d} ({percentage:5.1f}%)")
+        print(f"  {str(state):15s}: {count:5d} ({percentage:5.1f}%)")
 
     return states, {
         'total_files': len(json_files),
@@ -179,7 +203,6 @@ def load_algorithm_results(directory: str, property_name: str, config: Dict[str,
 
 def calculate_metrics(algo_states: List[str], gt_states: List[str]) -> Dict:
     """Calculate comparison metrics between algorithm and ground truth."""
-
     if len(algo_states) != len(gt_states):
         print(f"Warning: Sequence length mismatch (algo={len(algo_states)}, gt={len(gt_states)})")
         min_len = min(len(algo_states), len(gt_states))
@@ -384,7 +407,13 @@ def main():
     # Ensure same length
     if len(algo_states) != len(gt_states):
         print(f"\nResampling to match lengths (algo={len(algo_states)}, gt={len(gt_states)})")
-        if len(gt_states) < len(algo_states):
+        if len(algo_states) == 0:
+            print("Error: No algorithm results found in directory")
+            return 1
+        elif len(gt_states) == 0:
+            print("Error: No ground truth results found")
+            return 1
+        elif len(gt_states) < len(algo_states):
             # Resample GT to match algorithm length
             indices = np.linspace(0, len(gt_states) - 1, len(algo_states))
             gt_states = [gt_states[int(np.round(idx))] for idx in indices]
